@@ -1,0 +1,1 @@
+"""Smart Wardrobe ERP phase 1."""
