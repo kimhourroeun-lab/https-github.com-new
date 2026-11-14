@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import db as store
+from . import planner
 
 ROOT = Path(__file__).resolve().parents[1]
 OWNER_PASSWORD = os.getenv("SMART_WARDROBE_PASSWORD", "")
@@ -29,7 +30,7 @@ if IS_RAILWAY and (not OWNER_PASSWORD or not os.getenv("SESSION_SECRET")):
     raise RuntimeError("Public Railway deployment requires SMART_WARDROBE_PASSWORD and SESSION_SECRET")
 
 store.init_db()
-app = FastAPI(title="Smart Wardrobe ERP", version="1.0.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="Smart Wardrobe ERP", version="1.1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.mount("/static", StaticFiles(directory=ROOT / "app" / "static"), name="static")
 
 
@@ -162,7 +163,7 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "smart-wardrobe-erp"}
+    return {"status": "ok", "service": "smart-wardrobe-erp", "version": "1.1.0"}
 
 
 @app.get("/api/session")
@@ -200,7 +201,7 @@ def bootstrap():
         total = conn.execute("SELECT COUNT(*) AS n FROM garments").fetchone()["n"]
         recent = list_garments(conn)[:6]
         return {"wardrobe": wardrobe, "compartments": compartments, "categories": categories,
-                "total": total, "unassigned": unassigned, "recent": recent}
+                "total": total, "unassigned": unassigned, "recent": recent, "planner": planner.read_plan(conn)}
 
 
 @app.get("/api/garments")
@@ -302,6 +303,11 @@ def delete_garment(garment_id: int):
 def update_wardrobe(body: WardrobeUpdate):
     with store.db() as conn:
         conn.execute("UPDATE wardrobes SET name=?,location=? WHERE id=1", (body.name.strip(), body.location.strip()))
+        plan = planner.read_plan(conn)
+        plan["room"]["name"] = body.location.strip()
+        import json
+        conn.execute("UPDATE planner_config SET document=?,revision=revision+1 WHERE id=1",
+                     (json.dumps({"room":plan["room"],"cabinet":plan["cabinet"]}),))
         return to_dict(conn.execute("SELECT * FROM wardrobes WHERE id=1").fetchone())
 
 
@@ -312,6 +318,7 @@ def update_compartment(compartment_id: int, body: CompartmentUpdate):
     with store.db() as conn:
         require_compartment(conn, compartment_id)
         conn.execute("UPDATE compartments SET label=?,kind=? WHERE id=?", (body.label.strip(), body.kind, compartment_id))
+        conn.execute("UPDATE planner_config SET revision=revision+1 WHERE id=1")
         return to_dict(conn.execute("SELECT * FROM compartments WHERE id=?", (compartment_id,)).fetchone())
 
 
@@ -357,3 +364,6 @@ def backup():
             archive.writestr("RESTORE.txt", "Stop the app, copy data/wardrobe.sqlite3 and uploads/ into the app folder, then restart.\n")
         return Response(stream.getvalue(), media_type="application/zip",
                         headers={"Content-Disposition": 'attachment; filename="smart_wardrobe_backup.zip"'})
+
+
+planner.install(app)

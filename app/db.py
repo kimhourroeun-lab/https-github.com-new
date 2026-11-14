@@ -9,7 +9,7 @@ DB_PATH = Path(os.environ.get("DATABASE_PATH", ROOT / "data" / "wardrobe.sqlite3
 UPLOADS_PATH = Path(os.environ.get("UPLOADS_PATH", ROOT / "uploads"))
 
 CATEGORIES = ["shirt", "pants", "dress", "jacket", "skirt", "accessory", "other"]
-COMPARTMENT_KINDS = ["hanger", "shelf", "drawer"]
+COMPARTMENT_KINDS = ["hanger", "shelf", "drawer", "box"]
 
 
 def connection():
@@ -78,6 +78,7 @@ def init_db():
           changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         );
         """)
+        seed = not conn.execute("SELECT 1 FROM wardrobes WHERE id=1").fetchone()
         conn.execute("INSERT OR IGNORE INTO wardrobes(id,code,name,location) VALUES(1,'W01','My Wardrobe','Bedroom')")
         # Codes A1-C3 represent columns A-C and horizontal tiers 1-3 (top to bottom).
         default_names = [
@@ -91,10 +92,13 @@ def init_db():
             ("B3", "Center drawer", "drawer", 3, 2),
             ("C3", "Bottom right shelf", "shelf", 3, 3),
         ]
-        conn.executemany("""
+        if seed:
+            conn.executemany("""
         INSERT OR IGNORE INTO compartments(wardrobe_id,code,label,kind,row_position,column_position)
         VALUES(1,?,?,?,?,?)
         """, default_names)
+    from .planner import migrate
+    migrate()
 
 
 def garment_row(conn, garment_id):
